@@ -3,11 +3,13 @@ import os
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
+from aiohttp import web
 
-# --- Настройки (задаются на хостинге, в коде менять ничего не нужно) ---
-BOT_TOKEN = os.getenv("BOT_TOKEN", "ВСТАВЬТЕ_ТОКЕН_СЮДА")
-CHANNEL_ID = os.getenv("CHANNEL_ID", "@ваш_канал")          # например @my_channel
+# --- Настройки (задаются в Render -> Environment, в коде менять ничего не нужно) ---
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+CHANNEL_ID = os.getenv("CHANNEL_ID", "@your_channel")      # например @my_channel
 DOWNLOAD_LINK = os.getenv("DOWNLOAD_LINK", "https://example.com/file.zip")
+PORT = int(os.getenv("PORT", "8080"))                      # Render подставляет сам
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -21,10 +23,9 @@ def is_subscribed(status: str) -> bool:
 def subscribe_button() -> types.InlineKeyboardMarkup:
     """Кнопка-ссылка на канал."""
     channel = CHANNEL_ID.lstrip("@")
-    kb = types.InlineKeyboardMarkup(inline_keyboard=[[
+    return types.InlineKeyboardMarkup(inline_keyboard=[[
         types.InlineKeyboardButton(text="Подписаться на канал", url=f"https://t.me/{channel}")
     ]])
-    return kb
 
 
 @dp.message(Command("start"))
@@ -39,9 +40,7 @@ async def start(message: types.Message):
 @dp.message(Command("getfile"))
 async def get_file(message: types.Message):
     try:
-        member = await bot.get_chat_member(
-            chat_id=CHANNEL_ID, user_id=message.from_user.id
-        )
+        member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=message.from_user.id)
     except Exception:
         await message.answer(
             "Не удалось проверить подписку. Убедитесь, что бот добавлен "
@@ -58,7 +57,26 @@ async def get_file(message: types.Message):
         )
 
 
+# --- Веб-сервер: нужен только для того, чтобы Render считал сервис живым ---
+async def health(request: web.Request) -> web.Response:
+    return web.Response(text="Bot is alive")
+
+
+async def start_web_server() -> None:
+    app = web.Application()
+    app.router.add_get("/", health)
+    app.router.add_get("/health", health)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
+    print(f"Web server started on port {PORT}")
+
+
 async def main():
+    if not BOT_TOKEN:
+        raise SystemExit("BOT_TOKEN не задан: добавьте переменную окружения BOT_TOKEN")
+    await start_web_server()
     print("Bot started")
     await dp.start_polling(bot)
 
